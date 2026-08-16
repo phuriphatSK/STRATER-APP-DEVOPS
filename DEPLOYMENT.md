@@ -28,6 +28,7 @@ docker compose up -d --build                     # ยกทั้งระบ�
 | CI/CD Pipeline | แท็บ **Actions** บน GitHub Repository | หัวข้อ 7 |
 | รายการที่แก้ไขจากชุดตั้งต้น | — | หัวข้อ 8 |
 | ผลทดสอบที่ผู้เข้าสอบรันไว้ | — | หัวข้อ 9 |
+| ทดสอบความทนทาน (ทำให้ล่มแล้วดูระบบฟื้นตัว) | `docker compose stop db` ฯลฯ | หัวข้อ 10 |
 
 > รหัสผ่านที่ `init-env.sh` สุ่มให้จะแสดงบนหน้าจอ (ใช้ล็อกอิน Grafana) และถูกเก็บไว้ในไฟล์ `.env`
 > ซึ่ง `.gitignore` กันไม่ให้ขึ้น Repository ตามหลักการไม่เก็บค่าลับไว้ในซอร์สโค้ด
@@ -81,6 +82,24 @@ docker compose up -d --build                     # ยกทั้งระบ�
 - Docker Engine 24 ขึ้นไป และ Docker Compose v2
 - พื้นที่ว่างประมาณ 2 GB สำหรับ image และข้อมูล
 - พอร์ตที่ต้องว่าง: `8080` (เว็บ) และเพิ่มเติมเมื่อเปิดระบบเฝ้าระวัง `9090`, `9093`, `3000`
+
+### เชลล์ที่ใช้พิมพ์คำสั่ง
+
+ตัวระบบทำงานใน Container ที่เป็น Linux เสมอ ไม่ว่าเครื่องที่สั่งงานจะเป็นระบบปฏิบัติการใด
+สิ่งที่ต่างกันคือเชลล์ที่ใช้พิมพ์คำสั่งเท่านั้น
+
+| คำสั่ง | Linux / macOS | Windows + WSL | Windows + Git Bash | Windows PowerShell |
+|--------|:---:|:---:|:---:|:---:|
+| `docker compose ...` | ✅ | ✅ | ✅ | ✅ |
+| `docker ...` | ✅ | ✅ | ✅ | ✅ |
+| `./ops/scripts/*.sh` | ✅ | ✅ | ✅ | ❌ |
+| `make ...` | ✅ | ✅ | ต้องติดตั้งเพิ่ม | ❌ |
+| `curl ...` | ✅ | ✅ | ✅ | ใช้ `curl.exe` |
+
+- **บน Windows แนะนำ WSL หรือ Git Bash** เพราะสคริปต์ทั้งหมดเป็น POSIX shell
+- ถ้าใช้ WSL ให้ `git clone` ลงในระบบไฟล์ของ Linux (`~/`) ไม่ใช่ `/mnt/c/...`
+  เพราะการอ่านเขียนผ่าน `/mnt/c` ช้ากว่ามากและสิทธิ์รันของไฟล์อาจไม่ถูกต้อง
+- ผู้ใช้ PowerShell ที่ไม่ต้องการใช้สคริปต์ ใช้คำสั่ง `docker compose` ตรง ๆ ได้ทั้งหมด
 
 ---
 
@@ -362,17 +381,27 @@ ops/scripts/backup-drill.sh             ซ้อมสำรอง/กู้ค
 
 ## 9. ผลการทดสอบระบบจริง
 
-ทดสอบบน Docker Engine 29.3.1 / Docker Compose v5.1.1 ด้วยชุดคำสั่งที่ให้มาในโปรเจกต์นี้
+ระบบถูกทดสอบบนสภาพแวดล้อม 3 แบบ เพื่อยืนยันว่าไม่ได้ทำงานได้เฉพาะบนเครื่องผู้พัฒนา
+
+| สภาพแวดล้อม | ผล |
+|--------------|-----|
+| Windows + Docker Desktop (Docker Engine 29.3.1 / Compose v5.1.1) | ผ่านทั้งหมด |
+| Windows + WSL2 (Ubuntu 26.04 LTS) — clone ใหม่จาก Repository | ผ่านทั้งหมด |
+| Ubuntu บน GitHub Actions (job `integration`) | ผ่านทั้งหมด |
+
+### 9.1 การทำงานพื้นฐาน
 
 | รายการทดสอบ | คำสั่ง | ผล |
 |--------------|--------|-----|
 | ยกระบบขึ้นจากศูนย์ (build + start) | `docker compose up -d --build` | สำเร็จ ทุก container ขึ้นครบ |
-| ทุกบริการมีสถานะ healthy | `./ops/scripts/wait-for-healthy.sh` | ผ่านภายใน 27 วินาที |
+| ทุกบริการมีสถานะ healthy | `./ops/scripts/wait-for-healthy.sh` | ผ่านภายใน 27-36 วินาที |
 | ทดสอบการทำงานผ่าน Reverse Proxy | `./ops/scripts/smoke-test.sh` | **ผ่าน 18 / 18 รายการ** |
 | สำรอง → ลบข้อมูล → กู้คืน | `./ops/scripts/backup-drill.sh` | ผ่าน (16 → 8 → 16 กิจกรรม) พร้อมตรวจ checksum |
-| ระบบเฝ้าระวัง | `docker compose --profile monitoring up -d` | Prometheus เก็บข้อมูลได้ทุก target (`probe_success = 1` ทั้ง 5 จุด, `pg_up = 1`), โหลดกฎแจ้งเตือน 11 ข้อ, Grafana provision แดชบอร์ดสำเร็จ |
+| ระบบเฝ้าระวัง | `docker compose --profile monitoring up -d` | ทุก target เป็น UP ครบ 6 job (`probe_success = 1`, `pg_up = 1`), โหลดกฎแจ้งเตือน 11 ข้อ, Grafana provision แดชบอร์ดสำเร็จ |
 
-**ทดสอบพฤติกรรมเมื่อเกิดเหตุขัดข้อง**
+### 9.2 พฤติกรรมเมื่อเกิดเหตุขัดข้อง
+
+(ขั้นตอนการทดสอบซ้ำอยู่ในหัวข้อ 10)
 
 | สถานการณ์จำลอง | ผลที่ได้ | สรุป |
 |-----------------|----------|------|
@@ -380,10 +409,98 @@ ops/scripts/backup-drill.sh             ซ้อมสำรอง/กู้ค
 | เปิด `backend` กลับ | `/api/health` กลับมา 200 เองภายในไม่กี่วินาที | Nginx เชื่อมต่อ upstream ใหม่ได้เองโดยไม่ต้องรีสตาร์ต |
 | หยุด `db` | `/api/health` ตอบ **503** `{"status":"degraded","database":"down"}` | Health check สะท้อนสถานะจริง ใช้กับระบบเฝ้าระวังได้ |
 | เปิด `db` กลับ | `/api/health` กลับเป็น `{"status":"ok","database":"up"}` | ระบบฟื้นตัวเองได้ |
+| โปรเซสของแอปแครช | `RestartCount` เพิ่มขึ้น และกลับเป็น `running (healthy)` เองใน ~12 วินาที | นโยบาย `restart: unless-stopped` ทำงานจริง |
+| ยิง 200 คำขอพร้อมกัน | ผ่าน 97 / ถูกปฏิเสธด้วย 503 จำนวน 103 | Rate limit ของ Nginx ปกป้องระบบด้านหลังได้ |
+
+### 9.3 การตรวจไฟล์ตั้งค่าด้วยเครื่องมือเฉพาะทาง
+
+| เครื่องมือ | ตรวจอะไร | ผล |
+|-----------|----------|-----|
+| `promtool check config` | Prometheus + กฎแจ้งเตือน | valid — พบกฎครบ 11 ข้อ |
+| `amtool check-config` | Alertmanager | valid — 3 inhibit rules, 1 receiver |
+| `nginx -t` | Reverse Proxy | syntax ok |
+| `shellcheck` | สคริปต์ทั้ง 7 ไฟล์ | ไม่มี error หรือ warning |
+| `hadolint` | Dockerfile ทั้ง 3 ไฟล์ | ไม่มี error |
 
 ---
 
-## 10. การแก้ปัญหาที่พบบ่อย
+## 10. การทดสอบความทนทานของระบบ (ทำตามได้เอง)
+
+ชุดทดสอบนี้จงใจทำให้ระบบมีปัญหา เพื่อพิสูจน์ว่าระบบตรวจจับได้ ฟื้นตัวได้ และแจ้งเตือนได้จริง
+ทุกข้อด้านล่างผ่านการรันจริงมาแล้ว พร้อมคำสั่งกู้คืนกำกับไว้
+
+> ก่อนเริ่ม ให้เปิดหน้าเหล่านี้ค้างไว้: <http://localhost:8080> · <http://localhost:9090/alerts> · <http://localhost:9093>
+
+### 10.1 ฐานข้อมูลล่ม
+
+```bash
+docker compose stop db
+curl http://localhost:8080/api/health          # ได้ HTTP 503 + "database":"down"
+```
+
+รอ 1-2 นาที หน้า `/alerts` จะเห็น `PostgresDown` และ `ApiHealthDegraded` เปลี่ยนสถานะ
+**Inactive → Pending → Firing** แล้วปรากฏที่หน้า Alertmanager
+โดยจะเห็นเฉพาะต้นเหตุ เพราะ inhibit rule กลบการเตือนปลายเหตุไว้
+
+```bash
+docker compose start db                        # กู้คืน — health กลับเป็น ok เอง
+```
+
+### 10.2 Back-end ล่ม แต่หน้าเว็บต้องไม่ล่มตาม
+
+```bash
+docker compose stop backend
+curl -o /dev/null -w '%{http_code}\n' http://localhost:8080/           # 200 — หน้าเว็บยังอยู่
+curl -o /dev/null -w '%{http_code}\n' http://localhost:8080/api/health # 502 — เฉพาะ API
+docker compose start backend                                          # ฟื้นเองใน ~5 วินาที
+```
+
+### 10.3 แอปพลิเคชันแครช — ระบบต้องซ่อมตัวเอง
+
+```bash
+docker exec psu-backend sh -c 'kill -9 $(pgrep -n node)'
+docker inspect psu-backend --format 'RestartCount={{.RestartCount}} State={{.State.Status}}'
+```
+
+รอประมาณ 15 วินาทีแล้วตรวจซ้ำ — `RestartCount` จะเพิ่มขึ้น 1 และคอนเทนเนอร์กลับเป็น
+`running (healthy)` เองโดยไม่ต้องสั่งอะไร ตามนโยบาย `restart: unless-stopped`
+
+> **ข้อควรรู้:** การสั่ง `docker kill psu-backend` จากภายนอก **จะไม่ถูกปลุกกลับ** เพราะ Docker
+> ถือว่าเป็นคำสั่งที่ผู้ดูแลระบบตั้งใจสั่งเอง เช่นเดียวกับ `docker stop` — นโยบายรีสตาร์ตมีไว้
+> รับมือกับความผิดปกติ ไม่ใช่ขัดคำสั่งผู้ดูแล การทดสอบจึงต้องจำลองให้โปรเซสในคอนเทนเนอร์ตายเอง
+> และมีกฎ `ContainerRestartingRepeatedly` คอยจับกรณีรีสตาร์ตซ้ำเกิน 2 ครั้งใน 15 นาที
+> ซึ่งบ่งชี้ว่ามีปัญหาที่ต้องเข้าไปแก้จริง
+
+### 10.4 ข้อมูลสูญหาย แล้วกู้คืน
+
+```bash
+docker compose exec db psql -U app_user -d psu_activities -c "DELETE FROM activities;"
+curl "http://localhost:8080/api/activities"    # total: 0 — เปิดหน้าเว็บจะว่างเปล่า
+
+docker compose exec -e CONFIRM=yes backup restore.sh latest
+curl "http://localhost:8080/api/activities"    # total: 16 — ข้อมูลกลับมาครบ
+```
+
+### 10.5 การยิงถล่ม API
+
+```bash
+for i in $(seq 1 200); do curl -s -o /dev/null -w '%{http_code}\n' \
+  http://localhost:8080/api/activities & done | sort | uniq -c
+```
+
+ผลที่ได้จากการทดสอบจริง: **ผ่าน 97 คำขอ / ถูกปฏิเสธด้วย HTTP 503 จำนวน 103 คำขอ**
+คือ Nginx จำกัดอัตราไว้ที่ 20 คำขอ/วินาที (burst 40) ระบบด้านหลังจึงไม่ล้มตามการยิงถล่ม
+
+### 10.6 กลับสู่สภาพปกติ
+
+```bash
+docker compose --profile monitoring up -d
+./ops/scripts/smoke-test.sh http://localhost:8080
+```
+
+---
+
+## 11. การแก้ปัญหาที่พบบ่อย
 
 | อาการ | สาเหตุและวิธีแก้ |
 |-------|------------------|
