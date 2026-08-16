@@ -10,8 +10,8 @@ COMPOSE := docker compose
 help: ## แสดงรายการคำสั่งทั้งหมด
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
-init: ## สร้างไฟล์ .env จากแม่แบบ (ทำครั้งแรกครั้งเดียว)
-	@test -f .env || (cp .env.example .env && echo "สร้างไฟล์ .env แล้ว — กรุณาแก้รหัสผ่านก่อนใช้งานจริง")
+init: ## สร้างไฟล์ .env พร้อมสุ่มรหัสผ่านอัตโนมัติ (ทำครั้งแรกครั้งเดียว)
+	@sh ./ops/scripts/init-env.sh
 
 up: ## ยกระบบขึ้น (build ใหม่ถ้าจำเป็น)
 	$(COMPOSE) up -d --build

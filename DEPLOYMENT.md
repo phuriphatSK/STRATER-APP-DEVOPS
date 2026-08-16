@@ -6,6 +6,34 @@
 
 ---
 
+## 🔎 สำหรับผู้ตรวจ — ทดสอบทั้งระบบด้วย 4 คำสั่ง
+
+ต้องมีเพียง Docker Engine + Docker Compose v2 เท่านั้น ไม่ต้องติดตั้ง Node.js หรือ PostgreSQL บนเครื่อง
+
+```bash
+git clone <URL ของ Repository> && cd starter-app-devops
+
+./ops/scripts/init-env.sh                        # สร้าง .env พร้อมสุ่มรหัสผ่านให้อัตโนมัติ
+docker compose up -d --build                     # ยกทั้งระบบขึ้น (ใช้เวลาประมาณ 2-3 นาทีครั้งแรก)
+./ops/scripts/wait-for-healthy.sh                # รอจนทุกบริการพร้อม
+./ops/scripts/smoke-test.sh http://localhost:8080 # ทดสอบอัตโนมัติ 18 รายการ
+```
+
+จากนั้นเปิดเว็บที่ <http://localhost:8080>
+
+| ต้องการตรวจเรื่อง | คำสั่ง / ที่อยู่ | ดูรายละเอียดที่ |
+|--------------------|------------------|------------------|
+| การสำรองและกู้คืนข้อมูล | `./ops/scripts/backup-drill.sh` | หัวข้อ 5 |
+| ระบบเฝ้าระวังและการแจ้งเตือน | `docker compose --profile monitoring up -d` แล้วเปิด <http://localhost:3000> | หัวข้อ 6 |
+| CI/CD Pipeline | แท็บ **Actions** บน GitHub Repository | หัวข้อ 7 |
+| รายการที่แก้ไขจากชุดตั้งต้น | — | หัวข้อ 8 |
+| ผลทดสอบที่ผู้เข้าสอบรันไว้ | — | หัวข้อ 9 |
+
+> รหัสผ่านที่ `init-env.sh` สุ่มให้จะแสดงบนหน้าจอ (ใช้ล็อกอิน Grafana) และถูกเก็บไว้ในไฟล์ `.env`
+> ซึ่ง `.gitignore` กันไม่ให้ขึ้น Repository ตามหลักการไม่เก็บค่าลับไว้ในซอร์สโค้ด
+
+---
+
 ## 1. ภาพรวมสถาปัตยกรรม
 
 ```
@@ -59,9 +87,9 @@
 ## 3. เริ่มใช้งาน (Quick Start)
 
 ```bash
-# 1) สร้างไฟล์ตั้งค่าจากแม่แบบ แล้วแก้รหัสผ่านให้เรียบร้อย
-cp .env.example .env
-#    ต้องแก้อย่างน้อย: POSTGRES_PASSWORD และ GRAFANA_ADMIN_PASSWORD
+# 1) สร้างไฟล์ตั้งค่า พร้อมสุ่มรหัสผ่านอัตโนมัติ
+./ops/scripts/init-env.sh
+#    หรือทำเองด้วย: cp .env.example .env แล้วแก้ POSTGRES_PASSWORD และ GRAFANA_ADMIN_PASSWORD
 
 # 2) ยกระบบขึ้น
 docker compose up -d --build
