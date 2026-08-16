@@ -1,0 +1,119 @@
+# ============================================================================
+#  CD — นำระบบขึ้นเซิร์ฟเวอร์ปลายทางหลัง CI ผ่านทั้งหมด
+#
+#  ทำงานเมื่อ
+#    - push tag รูปแบบ v* (ขึ้น production)
+#    - สั่งด้วยมือผ่าน workflow_dispatch (เลือก environment ได้)
+#
+#  ค่าลับที่ต้องตั้งไว้ใน Repository Settings > Secrets
+#    DEPLOY_HOST           โฮสต์ของเซิร์ฟเวอร์ปลายทาง
+#    DEPLOY_USER           ผู้ใช้ที่ใช้ ssh
+#    DEPLOY_SSH_KEY        private key สำหรับ ssh
+#    DEPLOY_PATH           พาธที่วางโปรเจกต์บนเซิร์ฟเวอร์ เช่น /srv/psu-activities
+#    POSTGRES_PASSWORD     รหัสผ่านฐานข้อมูลของสภาพแวดล้อมนั้น
+#    GRAFANA_ADMIN_PASSWORD รหัสผ่านผู้ดูแล Grafana
+# ============================================================================
+name: CD
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "สภาพแวดล้อมปลายทาง"
+        type: choice
+        options: [staging, production]
+        default: staging
+      image_tag:
+        description: "tag ของ image ที่ต้องการนำขึ้น"
+        type: string
+        default: latest
+
+concurrency:
+  group: cd-${{ github.event.inputs.environment || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'production' }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: เตรียม SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: คัดลอกไฟล์ตั้งค่าขึ้นเซิร์ฟเวอร์
+        run: |
+          rsync -az --delete \
+            --exclude '.git' --exclude 'node_modules' --exclude 'backups' --exclude '.env' \
+            -e "ssh -i ~/.ssh/id_ed25519" \
+            ./ "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ secrets.DEPLOY_PATH }}/"
+
+      - name: สั่งนำระบบขึ้น (rolling update + ตรวจสุขภาพ)
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.image_tag || github.ref_name }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" bash -se <<'REMOTE'
+          set -euo pipefail
+          cd "${{ secrets.DEPLOY_PATH }}"
+
+          # สร้าง/อัปเดตไฟล์ .env จากค่าลับของ workflow
+          # git อาจไม่บันทึกสิทธิ์รันของสคริปต์เมื่อ commit จาก Windows
+          chmod +x ops/scripts/*.sh ops/backup/*.sh
+
+          umask 077
+          cat > .env <<ENVFILE
+          POSTGRES_DB=psu_activities
+          POSTGRES_USER=app_user
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          GRAFANA_ADMIN_PASSWORD=${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+          APP_PORT=8080
+          APP_VERSION=${{ github.ref_name }}
+          IMAGE_TAG=${{ github.event.inputs.image_tag || github.ref_name }}
+          LOG_LEVEL=info
+          TZ=Asia/Bangkok
+          ENVFILE
+
+          # สำรองฐานข้อมูลก่อน deploy เสมอ เพื่อให้ย้อนกลับได้
+          docker compose exec -T backup backup.sh || echo "ยังไม่มีบริการสำรองข้อมูลเดิม ข้ามขั้นตอนนี้"
+
+          docker compose pull --ignore-buildable
+          docker compose up -d --build --remove-orphans
+          docker image prune -f
+          REMOTE
+
+      - name: ตรวจสอบว่าระบบใช้งานได้จริงหลัง deploy
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "cd ${{ secrets.DEPLOY_PATH }} && ./ops/scripts/wait-for-healthy.sh 180 && ./ops/scripts/smoke-test.sh http://localhost:8080"
+
+      - name: ย้อนกลับเวอร์ชันเดิมเมื่อ deploy ไม่สำเร็จ
+        if: failure()
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" bash -se <<'REMOTE'
+          set -euo pipefail
+          cd "${{ secrets.DEPLOY_PATH }}"
+          # ย้อนกลับไปใช้ image เวอร์ชันก่อนหน้าที่บันทึกไว้ตอน deploy สำเร็จครั้งล่าสุด
+          if [ -f .env.previous ]; then
+            cp .env.previous .env
+            docker compose up -d --remove-orphans
+            echo "ย้อนกลับสู่เวอร์ชันก่อนหน้าเรียบร้อย"
+          else
+            echo "ไม่พบข้อมูลเวอร์ชันก่อนหน้า — ต้องย้อนกลับด้วยมือ"
+            exit 1
+          fi
+          REMOTE
+          echo "::error::การนำขึ้นระบบไม่สำเร็จ ระบบถูกย้อนกลับสู่สถานะก่อนหน้า"
+
+      - name: บันทึกเวอร์ชันที่ deploy สำเร็จไว้ใช้ย้อนกลับครั้งถัดไป
+        if: success()
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "cd ${{ secrets.DEPLOY_PATH }} && cp .env .env.previous && chmod 600 .env.previous"

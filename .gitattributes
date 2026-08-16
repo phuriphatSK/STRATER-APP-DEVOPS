@@ -1,0 +1,20 @@
+# ----------------------------------------------------------------------------
+#  บังคับให้ไฟล์ที่ต้องรันบน Linux/Container ใช้ตัวขึ้นบรรทัดแบบ LF เสมอ
+#  ป้องกันปัญหา CRLF จากการ commit บน Windows ซึ่งทำให้สคริปต์ใน container
+#  รันไม่ได้ (ขึ้น error แบบ: /bin/sh^M: bad interpreter)
+# ----------------------------------------------------------------------------
+* text=auto eol=lf
+
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.conf      text eol=lf
+*.sql       text eol=lf
+Makefile    text eol=lf
+
+# ไฟล์ไบนารี — ห้ามแปลง
+*.png binary
+*.jpg binary
+*.ico binary
+*.dump binary

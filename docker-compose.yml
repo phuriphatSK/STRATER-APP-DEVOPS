@@ -1,0 +1,298 @@
+# ============================================================================
+#  Starter Application — เว็บกิจกรรมพัฒนานักศึกษา
+#  Docker Compose สำหรับนำระบบขึ้นใช้งาน
+#
+#  โครงสร้างบริการ
+#    web      : Nginx = Web Server ของ Front-end + Reverse Proxy (/api -> backend)
+#    backend  : RESTful API (Node.js 20 + Express) — ไม่เปิดพอร์ตออกสู่ภายนอก
+#    db       : PostgreSQL 16 + สคริปต์ init.sql
+#    backup   : สำรองฐานข้อมูลอัตโนมัติตามรอบเวลา พร้อมลบไฟล์เก่าตามอายุที่กำหนด
+#
+#  บริการเฝ้าระวัง (profile: monitoring)
+#    prometheus, alertmanager, grafana, node-exporter, cadvisor,
+#    postgres-exporter, blackbox-exporter
+#
+#  คำสั่งใช้งาน
+#    docker compose up -d --build                      # ระบบหลัก
+#    docker compose --profile monitoring up -d         # ระบบหลัก + เฝ้าระวัง
+# ============================================================================
+
+name: psu-activities
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  # ------------------------------------------------------------------ ฐานข้อมูล
+  db:
+    image: postgres:16-alpine
+    container_name: psu-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-psu_activities}
+      POSTGRES_USER: ${POSTGRES_USER:-app_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?ต้องกำหนด POSTGRES_PASSWORD ในไฟล์ .env}
+      TZ: ${TZ:-Asia/Bangkok}
+      # ให้ initdb ใช้ scram-sha-256 แทน md5
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # สคริปต์นี้จะถูกรันอัตโนมัติเฉพาะตอนสร้างฐานข้อมูลครั้งแรกเท่านั้น
+      - ./db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app_user} -d ${POSTGRES_DB:-psu_activities}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    logging: *default-logging
+
+  # -------------------------------------------------------------------- Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-1.0.0}
+    image: ${IMAGE_REGISTRY:-local}/psu-activities-backend:${IMAGE_TAG:-latest}
+    container_name: psu-backend
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      # เรียก API ผ่าน Reverse Proxy โดเมนเดียวกัน จึงไม่จำเป็นต้องเปิด CORS กว้าง
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-psu_activities}
+      PGUSER: ${POSTGRES_USER:-app_user}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?ต้องกำหนด POSTGRES_PASSWORD ในไฟล์ .env}
+      PGPOOL_MAX: ${PGPOOL_MAX:-10}
+      TZ: ${TZ:-Asia/Bangkok}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - data
+      - edge
+    # ไม่ mapping port ออกสู่ host — เข้าถึงได้เฉพาะผ่าน Reverse Proxy เท่านั้น
+    expose:
+      - "3001"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging: *default-logging
+
+  # ------------------------------------------ Web Server + Reverse Proxy (Nginx)
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: ${IMAGE_REGISTRY:-local}/psu-activities-web:${IMAGE_TAG:-latest}
+    container_name: psu-web
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    environment:
+      TZ: ${TZ:-Asia/Bangkok}
+    depends_on:
+      backend:
+        condition: service_started
+    networks:
+      - edge
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    logging: *default-logging
+
+  # ------------------------------------------------------ สำรองข้อมูลอัตโนมัติ
+  backup:
+    build:
+      context: ./ops/backup
+      dockerfile: Dockerfile
+    image: ${IMAGE_REGISTRY:-local}/psu-activities-backup:${IMAGE_TAG:-latest}
+    container_name: psu-backup
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-psu_activities}
+      PGUSER: ${POSTGRES_USER:-app_user}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?ต้องกำหนด POSTGRES_PASSWORD ในไฟล์ .env}
+      # รอบเวลาสำรองข้อมูลแบบ cron (ค่าเริ่มต้น 02:00 ของทุกวัน)
+      BACKUP_CRON: ${BACKUP_CRON:-0 2 * * *}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      BACKUP_ON_START: ${BACKUP_ON_START:-true}
+      TZ: ${TZ:-Asia/Bangkok}
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - data
+    logging: *default-logging
+
+  # ======================================================================
+  #  ระบบเฝ้าระวัง (เริ่มด้วย --profile monitoring)
+  # ======================================================================
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: psu-prometheus
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./ops/monitoring/prometheus:/etc/prometheus:ro
+      - promdata:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - edge
+      - data
+      - monitoring
+    logging: *default-logging
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: psu-alertmanager
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./ops/monitoring/alertmanager:/etc/alertmanager:ro
+      - alertmanagerdata:/alertmanager
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    networks:
+      - monitoring
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: psu-grafana
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?ต้องกำหนด GRAFANA_ADMIN_PASSWORD ในไฟล์ .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      TZ: ${TZ:-Asia/Bangkok}
+    volumes:
+      - ./ops/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+    logging: *default-logging
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: psu-node-exporter
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - monitoring
+    logging: *default-logging
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: psu-cadvisor
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - monitoring
+    logging: *default-logging
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: psu-postgres-exporter
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-app_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-psu_activities}?sslmode=disable"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - data
+      - monitoring
+    logging: *default-logging
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: psu-blackbox-exporter
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+    volumes:
+      - ./ops/monitoring/blackbox:/etc/blackbox:ro
+    networks:
+      - edge
+      - monitoring
+    logging: *default-logging
+
+networks:
+  # เครือข่ายฝั่งผู้ใช้: web <-> backend (และตัวตรวจสอบจากภายนอก)
+  edge:
+    driver: bridge
+  # เครือข่ายฝั่งข้อมูล: backend/backup <-> db  (ฐานข้อมูลไม่ติดต่อกับ web โดยตรง)
+  data:
+    driver: bridge
+    internal: false
+  monitoring:
+    driver: bridge
+
+volumes:
+  pgdata:
+  promdata:
+  alertmanagerdata:
+  grafanadata:

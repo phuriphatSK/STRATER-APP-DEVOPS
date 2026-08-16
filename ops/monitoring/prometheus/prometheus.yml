@@ -1,0 +1,64 @@
+# ============================================================================
+#  Prometheus — ตั้งค่าการเก็บ metric ของระบบ
+# ============================================================================
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    system: psu-activities
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # ---- ตัว Prometheus เอง ----
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ---- ทรัพยากรของเครื่องแม่ข่าย (CPU / RAM / Disk) ----
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          role: infrastructure
+
+  # ---- ทรัพยากรระดับ Container ----
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+        labels:
+          role: containers
+
+  # ---- ฐานข้อมูล PostgreSQL ----
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+        labels:
+          role: database
+
+  # ---- ตรวจสอบบริการจากภายนอกผ่าน Blackbox (probe HTTP) ----
+  #      ครอบคลุมทั้งหน้าเว็บ, /api/health และ Reverse Proxy
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://web/                # หน้าเว็บ Front-end
+          - http://web/healthz         # Reverse Proxy
+          - http://web/api/health      # Back-end ผ่าน Reverse Proxy
+          - http://backend:3001/api/health   # Back-end โดยตรง
+          - http://web/api/activities?page=1&limit=1
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

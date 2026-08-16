@@ -1,0 +1,103 @@
+# ============================================================================
+#  กฎการแจ้งเตือน (Alert Rules)
+# ============================================================================
+groups:
+  # ------------------------------------------------------- ความพร้อมของบริการ
+  - name: availability
+    rules:
+      - alert: ServiceDown
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "บริการ {{ $labels.instance }} ไม่ตอบสนอง"
+          description: "ตรวจสอบด้วย Blackbox แล้วไม่สำเร็จติดต่อกันเกิน 2 นาที"
+
+      - alert: ApiHealthDegraded
+        expr: probe_http_status_code{instance="http://web/api/health"} == 503
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API รายงานสถานะผิดปกติ (HTTP 503)"
+          description: "โดยทั่วไปหมายถึง Back-end เชื่อมต่อฐานข้อมูลไม่ได้"
+
+      - alert: SlowApiResponse
+        expr: probe_duration_seconds{instance="http://web/api/activities?page=1&limit=1"} > 1.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API ตอบสนองช้ากว่าปกติ"
+          description: "เวลาตอบสนองเกิน 1.5 วินาที ต่อเนื่อง 5 นาที ({{ $value }}s)"
+
+      - alert: SslOrEndpointErrors
+        expr: probe_http_status_code >= 500
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "พบสถานะ HTTP {{ $value }} ที่ {{ $labels.instance }}"
+
+  # ------------------------------------------------------------- ฐานข้อมูล
+  - name: database
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "เชื่อมต่อฐานข้อมูล PostgreSQL ไม่ได้"
+
+      - alert: PostgresTooManyConnections
+        expr: sum(pg_stat_activity_count) by (server) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "จำนวน connection ของฐานข้อมูลสูงผิดปกติ ({{ $value }})"
+
+  # -------------------------------------------------------- ทรัพยากรของระบบ
+  - name: resources
+    rules:
+      - alert: HighCpuUsage
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU ของเครื่อง {{ $labels.instance }} สูงเกิน 85%"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "หน่วยความจำเหลือน้อยกว่า 10%"
+
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 < 15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "พื้นที่ดิสก์ {{ $labels.mountpoint }} เหลือน้อยกว่า 15%"
+
+      - alert: ContainerRestartingRepeatedly
+        expr: increase(container_start_time_seconds{name=~"psu-.*"}[15m]) > 2
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} รีสตาร์ตซ้ำหลายครั้งใน 15 นาที"
+
+      - alert: ContainerHighMemory
+        expr: (container_memory_usage_bytes{name=~"psu-.*"} / container_spec_memory_limit_bytes{name=~"psu-.*"}) > 0.9 and container_spec_memory_limit_bytes{name=~"psu-.*"} > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} ใช้หน่วยความจำเกิน 90% ของโควตา"

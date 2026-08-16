@@ -1,0 +1,45 @@
+# ============================================================================
+#  Alertmanager — รวมและส่งต่อการแจ้งเตือน
+#  ค่าเริ่มต้นส่งเข้า webhook ภายใน (บันทึกไว้ดูใน log)
+#  หากต้องการส่งอีเมล/แชท ให้แก้ receiver ด้านล่าง แล้วเก็บค่าลับไว้ใน .env
+# ============================================================================
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: default
+      repeat_interval: 1h
+
+inhibit_rules:
+  # ถ้าบริการล่มทั้งตัวแล้ว ไม่ต้องเตือนเรื่องตอบสนองช้าซ้ำอีก
+  - source_matchers:
+      - alertname = "ServiceDown"
+    target_matchers:
+      - alertname = "SlowApiResponse"
+    equal: ["instance"]
+
+receivers:
+  # ค่าเริ่มต้น: เก็บการแจ้งเตือนไว้ในหน้าเว็บของ Alertmanager (http://localhost:9093)
+  # โดยยังไม่ส่งออกช่องทางภายนอก เพื่อไม่ต้องใส่ค่าลับลงใน Repository
+  - name: default
+
+    # ตัวอย่างการส่งอีเมล — เปิดใช้เมื่อมีเซิร์ฟเวอร์ SMTP ของหน่วยงาน
+    # email_configs:
+    #   - to: "sysadmin@psu.ac.th"
+    #     from: "alertmanager@psu.ac.th"
+    #     smarthost: "smtp.psu.ac.th:587"
+    #     auth_username: "alertmanager@psu.ac.th"
+    #     auth_password: "CHANGE_ME"
+
+    # ตัวอย่างการส่งเข้าระบบแชทผ่าน webhook
+    # webhook_configs:
+    #   - url: "https://chat.example.ac.th/hooks/CHANGE_ME"
+    #     send_resolved: true

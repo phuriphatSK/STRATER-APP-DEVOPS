@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>กิจกรรมพัฒนานักศึกษา | กองพัฒนานักศึกษาและศิษย์เก่าสัมพันธ์</title>
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // ที่อยู่ของ RESTful API
+    // ค่าเริ่มต้นเรียกผ่าน Reverse Proxy ที่เส้นทาง /api
+    // หากรัน Front-end แยกจาก Back-end โดยไม่มี Reverse Proxy ให้แก้เป็น
+    // window.API_BASE_URL = 'http://localhost:3001/api';
+    window.API_BASE_URL = '/api';
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1>กิจกรรมพัฒนานักศึกษา</h1>
+      <p class="subtitle">กองพัฒนานักศึกษาและศิษย์เก่าสัมพันธ์ มหาวิทยาลัยสงขลานครินทร์</p>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="filters" aria-label="ค้นหาและกรองกิจกรรม">
+      <input type="search" id="search" placeholder="ค้นหากิจกรรม..." aria-label="ค้นหากิจกรรม">
+      <select id="category" aria-label="กรองตามประเภทกิจกรรม">
+        <option value="">ทุกประเภท</option>
+      </select>
+    </section>
+
+    <p id="status" class="status" role="status"></p>
+
+    <section id="list" class="card-grid" aria-live="polite"></section>
+
+    <nav class="pagination" aria-label="แบ่งหน้า">
+      <button id="prev" type="button">ก่อนหน้า</button>
+      <span id="page-info"></span>
+      <button id="next" type="button">ถัดไป</button>
+    </nav>
+  </main>
+
+  <!-- กล่องรายละเอียดกิจกรรมและการลงทะเบียน -->
+  <div id="dialog" class="dialog" hidden>
+    <div class="dialog-panel" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <button id="dialog-close" class="dialog-close" type="button" aria-label="ปิด">&times;</button>
+      <div id="dialog-body"></div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <span id="health" class="health">กำลังตรวจสอบสถานะระบบ...</span>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
