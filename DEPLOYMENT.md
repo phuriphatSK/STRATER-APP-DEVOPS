@@ -154,13 +154,13 @@ Multi-stage build 3 ขั้น
 
 ### 4.2 Front-end + Reverse Proxy (`frontend/Dockerfile`, `frontend/nginx/default.conf`)
 
-Container เดียวทำหน้าที่ทั้ง Web Server ของไฟล์สแตติกและ Reverse Proxy
+Container เดียวทำหน้าที่ทั้ง Web Server ของไฟล์ static และ Reverse Proxy
 
 - `/api/*` → `http://backend:3001` (ส่งต่อ path เดิม จึงไม่ต้องแก้ `window.API_BASE_URL`)
 - ใช้ `resolver 127.0.0.11` กับตัวแปร upstream — Nginx สตาร์ตได้แม้ `backend` ยังไม่พร้อม แล้วค่อยเชื่อมเมื่อพร้อม
 - ส่งต่อ `X-Real-IP` / `X-Forwarded-For` / `X-Forwarded-Proto`
 - `limit_req` 20 req/s (burst 40) ป้องกันการยิงถล่มจุดลงทะเบียน
-- gzip, cache ไฟล์สแตติก 7 วัน, `index.html` ไม่ cache เพื่อให้ผู้ใช้ได้เวอร์ชันใหม่ทันทีหลัง deploy
+- gzip, cache ไฟล์ static 7 วัน, `index.html` ไม่ cache เพื่อให้ผู้ใช้ได้เวอร์ชันใหม่ทันทีหลัง deploy
 - security header: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, ปิด `server_tokens`
 
 ### 4.3 ฐานข้อมูล
