@@ -75,6 +75,8 @@ jobs:
       packages: write
       security-events: write
     strategy:
+      # ไม่ยกเลิก job อื่นเมื่อ image ใดล้มเหลว เพื่อให้เห็นผลครบทุกตัวในรอบเดียว
+      fail-fast: false
       matrix:
         include:
           - name: backend
@@ -86,11 +88,17 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # ชื่อ image ของ Container Registry ต้องเป็นตัวพิมพ์เล็กทั้งหมด
+      # แต่ชื่อ Repository บน GitHub อาจมีตัวพิมพ์ใหญ่ปนอยู่ จึงต้องแปลงก่อนใช้
+      - name: แปลงชื่อ image เป็นตัวพิมพ์เล็ก
+        id: image
+        run: echo "name=$(echo '${{ env.IMAGE_PREFIX }}' | tr '[:upper:]' '[:lower:]')-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+
       - name: กำหนด tag ของ image
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.name }}
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -119,7 +127,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: ตรวจช่องโหว่ของ Image ด้วย Trivy
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: sarif
