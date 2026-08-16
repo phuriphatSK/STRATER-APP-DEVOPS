@@ -43,7 +43,7 @@ scrape_configs:
           role: database
 
   # ---- ตรวจสอบบริการจากภายนอกผ่าน Blackbox (probe HTTP) ----
-  #      ครอบคลุมทั้งหน้าเว็บ, /api/health และ Reverse Proxy
+  #      ตรวจว่าตอบกลับ HTTP 200 ตามปกติหรือไม่
   - job_name: blackbox-http
     metrics_path: /probe
     params:
@@ -52,9 +52,26 @@ scrape_configs:
       - targets:
           - http://web/                # หน้าเว็บ Front-end
           - http://web/healthz         # Reverse Proxy
-          - http://web/api/health      # Back-end ผ่าน Reverse Proxy
           - http://backend:3001/api/health   # Back-end โดยตรง
           - http://web/api/activities?page=1&limit=1
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # ---- ตรวจสถานะระบบผ่าน Reverse Proxy แบบเข้มงวด ----
+  #      ใช้ module ที่ตรวจถึงเนื้อหาว่าต้องมี "database":"up" ด้วย
+  #      จึงจับกรณีที่ API ตอบ 200 แต่ฐานข้อมูลมีปัญหาได้
+  - job_name: blackbox-api-health
+    metrics_path: /probe
+    params:
+      module: [http_api_health]
+    static_configs:
+      - targets:
+          - http://web/api/health
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target

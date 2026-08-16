@@ -26,6 +26,19 @@ inhibit_rules:
       - alertname = "SlowApiResponse"
     equal: ["instance"]
 
+  # ถ้ารู้อยู่แล้วว่า API ตอบสถานะผิดปกติ ไม่ต้องเตือนเรื่องรหัส HTTP 5xx ซ้ำอีก
+  - source_matchers:
+      - alertname = "ApiHealthDegraded"
+    target_matchers:
+      - alertname = "SslOrEndpointErrors"
+    equal: ["instance"]
+
+  # เหตุที่ฐานข้อมูลล่มเป็นต้นตอของอาการอื่น จึงกลบการเตือนปลายเหตุไว้
+  - source_matchers:
+      - alertname = "PostgresDown"
+    target_matchers:
+      - alertname =~ "ApiHealthDegraded|SlowApiResponse"
+
 receivers:
   # ค่าเริ่มต้น: เก็บการแจ้งเตือนไว้ในหน้าเว็บของ Alertmanager (http://localhost:9093)
   # โดยยังไม่ส่งออกช่องทางภายนอก เพื่อไม่ต้องใส่ค่าลับลงใน Repository

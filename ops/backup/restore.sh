@@ -20,7 +20,7 @@ log() {
 }
 
 if [ "${TARGET}" = "latest" ]; then
-  TARGET="$(ls -1t "${BACKUP_DIR}"/${DB}-*.dump 2>/dev/null | head -n 1 || true)"
+  TARGET="$(ls -1t "${BACKUP_DIR}"/"${DB}"-*.dump 2>/dev/null | head -n 1 || true)"
 fi
 
 if [ -z "${TARGET}" ] || [ ! -f "${TARGET}" ]; then

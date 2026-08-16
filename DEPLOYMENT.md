@@ -283,6 +283,26 @@ Back-end พิมพ์ log เป็น JSON บรรทัดละราย
 **ค่าลับที่ต้องตั้งใน Repository Settings → Secrets**
 `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PATH`, `POSTGRES_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`
 
+### ขอบเขตที่ได้ทดสอบจริง และข้อจำกัด
+
+| ส่วน | สถานะ |
+|------|--------|
+| `ci.yml` ทั้ง 4 job | ✅ รันจริงบน GitHub Actions ผ่านครบ รวมถึง job `integration` ที่ยกทั้ง stack ขึ้นบน Ubuntu แล้วรัน smoke test 18 ข้อ + ซ้อมกู้คืนข้อมูล |
+| `cd.yml` | ⚠️ **ยังไม่ได้รันจริง** เนื่องจาก POC นี้ไม่มีเซิร์ฟเวอร์ปลายทางให้ deploy — ไฟล์นี้จึงเป็นการออกแบบกระบวนการนำขึ้นระบบ (สำรองข้อมูลก่อน → deploy → ตรวจสุขภาพ → ย้อนกลับเมื่อล้มเหลว) ที่พร้อมใช้เมื่อมีเซิร์ฟเวอร์และตั้งค่า Secrets ครบ |
+
+### การเข้าถึง Container Image ที่ CI สร้างไว้
+
+CI จะ push image ขึ้น GitHub Container Registry (GHCR) ทุกครั้งที่ push ขึ้น branch
+
+```bash
+docker pull ghcr.io/phuriphatsk/strater-app-devops-backend:main
+docker pull ghcr.io/phuriphatsk/strater-app-devops-web:main
+```
+
+> GHCR ตั้ง package เป็น **private** ให้โดยอัตโนมัติ หากต้องการให้ผู้อื่นดึง image ไปใช้ได้
+> ต้องเข้าไปตั้งเป็น Public ที่หน้า Packages ของ Repository ก่อน
+> ทั้งนี้ไม่จำเป็นต่อการตรวจผลงาน เพราะ `docker compose up -d --build` จะ build จากซอร์สโค้ดให้อยู่แล้ว
+
 ---
 
 ## 8. รายการที่แก้ไขจากชุดตั้งต้น

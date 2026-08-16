@@ -28,7 +28,11 @@ log "ตั้งตารางสำรองข้อมูลแล้ว (c
 
 if [ "${BACKUP_ON_START}" = "true" ]; then
   log "สำรองข้อมูลรอบแรกทันทีที่เริ่มทำงาน"
-  . /etc/backup.env && /usr/local/bin/backup.sh || log "การสำรองข้อมูลรอบแรกไม่สำเร็จ (ระบบจะลองใหม่ตามรอบเวลา)"
+  # shellcheck disable=SC1091  # ไฟล์นี้ถูกสร้างขึ้นตอน runtime จึงตรวจล่วงหน้าไม่ได้
+  . /etc/backup.env
+  if ! /usr/local/bin/backup.sh; then
+    log "การสำรองข้อมูลรอบแรกไม่สำเร็จ (ระบบจะลองใหม่ตามรอบเวลา)"
+  fi
 fi
 
 exec crond -f -l 8

@@ -52,7 +52,7 @@ groups:
           summary: "เชื่อมต่อฐานข้อมูล PostgreSQL ไม่ได้"
 
       - alert: PostgresTooManyConnections
-        expr: sum(pg_stat_activity_count) by (server) > 80
+        expr: sum by (datname) (pg_stat_activity_count) > 80
         for: 5m
         labels:
           severity: warning
